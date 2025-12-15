@@ -49,7 +49,7 @@ htmlcov/
 .streamlit/
 
 # Data files
-data/
+/data/
 # *.csv
 # *.parquet
 # *.pkl
@@ -71,6 +71,3 @@ Thumbs.db
 
 # Claude Code
 .claude/
-
-# Test results
-test_results.txt

@@ -1,102 +1,177 @@
-  # Project Description
-  
-  
-  # Streamlit Multi-Page & Tab Architecture
+# Project Description
 
-  ## Directory Structure
-  ```
-  project_root/
-  ├── Main_App.py              # Entrypoint with st.navigation
-  ├── pages/                   # Top-level navigation pages
-  │   └── analysis_parent.py   # Page with internal tabs
-  └── components/              # Component and Tab functions
-      ├── init.py              # Required (can be empty)
-      ├── header.py           # General reuable component
-      ├── tab_overview.py      # A tab "page"
-      └── tab_metrics.py       # A tab "page"
+Chart pattern recognition application built with NiceGUI for enhanced control over interactive components like Plotly charts with full event handling support.
 
-  ```
+# Implementation Patterns
 
-  ## Implementation Pattern
+## Main Entry Point
+```python
+# main.py
+from nicegui import ui
+from app.routes import *
 
-  **Main_App.py** - Router using `st.navigation()`:
-  ```python
-  import streamlit as st
-  st.set_page_config(page_title="App", layout="wide")
-  app_pages = [st.Page("pages/analysis_parent.py", title="Analysis", 
-  icon=":material/analytics:")]
-  pg = st.navigation(app_pages)
-  pg.run()
-
-  pages/analysis_parent.py - Lightweight tab container:
-  import streamlit as st
-  from components.tab_overview import render_overview_tab
-  from components.tab_download import render_download
-
-  st.title("Main Analysis View")
-  tab1, tab2 = st.tabs(["Overview", "Data Manager"])
-  with tab1:
-      render_overview_tab()
-  with tab2:
-      render_download_tab()
-
-  components/tab_*.py - Isolated tab content:
-  import streamlit as st
-  def render_overview_tab():
-      st.header("Overview")
-      st.metric("Revenue", "$150K", "3%")
+ui.run(title='OHLCV Analysis Platform', port=8080)
 ```
-  Key Rules:
-  - Use /components for tab content (not /subpages)
-  - Keep parent pages lightweight (tabs + imports only)
-  - One function per component file for isolated logic
 
-  ## Persistent State
-  - For all relevant user fields and selections, persistently save the state, so it will be the same when the user returns.
-  - Use Streamlit's st.session_state
+## Routes
+```python
+# app/routes.py
+from nicegui import ui
+from app.state import app_state
+from views.pattern_manager import render_pattern_manager
 
-  ### Implementation Pattern for Persistent Fields
-  To avoid conflicts between widget keys and session state, use **separate keys** for the widget and the persisted value:
+@ui.page('/pattern_manager')
+def pattern_manager_page():
+    ui.dark_mode().enable()
+    render_header()
+    render_navigation_drawer()
+    render_pattern_manager(app_state)
+```
 
-  ```python
-  # CORRECT - Use different keys for widget and persistence
-  window_size = st.number_input(
-      "Pattern Window Size (bars)",
-      min_value=10,
-      max_value=200,
-      value=st.session_state.get('scanner_window_size', 50),  # Read from persistence key
-      key="scanner_window_size_widget"  # Widget key (different from persistence key)
-  )
-  st.session_state['scanner_window_size'] = window_size  # Save to persistence key
+## State Management
+```python
+# app/state.py - Global state
+from app.state import app_state
 
-  # For selectbox with index-based persistence:
-  selected_file = st.selectbox(
-      "Select data file",
-      parquet_files,
-      index=st.session_state.get('scanner_file_index', 0),
-      key="scanner_file_select_widget"
-  )
-  if selected_file in parquet_files:
-      st.session_state['scanner_file_index'] = parquet_files.index(selected_file)
+# Initialize defaults
+if 'pattern_length' not in app_state:
+    app_state['pattern_length'] = 50
 
-  # For multiselect:
-  filter_labels = st.multiselect(
-      "Filter by Pattern Labels",
-      options=library.get_all_labels(),
-      default=st.session_state.get('scanner_filter_labels', []),
-      key="scanner_filter_labels_widget"
-  )
-  st.session_state['scanner_filter_labels'] = filter_labels
-  ```
+# Get state
+value = app_state.get('pattern_length', 50)
+value = app_state['pattern_length']
 
-  **Key Rules:**
-  - Widget `key` parameter should end with `_widget` to distinguish it
-  - `value` or `default` reads from a separate session state key (without `_widget`)
-  - After widget creation, manually save the value back to the persistence key
-  - This avoids the "widget was created with a default value but also had its value set via Session State" warning
+# Set state
+app_state['pattern_length'] = 100
+app_state.set('pattern_length', 100)
+```
 
-  # Code Generation Guideline
-  - Don't include sections for "instructions" and "how to use".  Keep the pages focused.
+AppState automatically separates JSON-serializable values from complex Python objects (DataFrames, Timestamps).
 
-  # Documentation
-  - Don't create unnecessary documentation unless explicitly asked to.  Such as test results and summary documentation.
+## Component Structure
+```python
+# components/patterns/label_patterns.py
+from nicegui import ui
+
+def render_label_patterns_tab(app_state):
+    with ui.card().classes('w-full'):
+        ui.label('Label Patterns').classes('text-h5')
+
+        # Create interactive Plotly chart
+        fig = create_chart(data)
+        plot = ui.plotly(fig).classes('w-full')
+
+        # Handle events
+        def handle_click(e):
+            if e.args and 'points' in e.args:
+                point = e.args['points'][0]
+                app_state['start_index'] = point['pointIndex']
+                ui.navigate.reload()
+
+        plot.on('plotly_click', handle_click)
+```
+
+# NiceGUI Essentials
+
+## Navigation
+```python
+ui.navigate.to('/page_path')    # Navigate to route
+ui.navigate.reload()             # Reload current page
+```
+
+## UI Components
+```python
+ui.label("Title").classes('text-h5')
+ui.button("Click", on_click=handler, color='primary', icon='search')
+ui.input(label='Name', value='default')
+ui.number(label='Count', value=50, min=1, max=100)
+ui.select(label='Pick', options=['A', 'B'], value='A')
+ui.checkbox('Enabled', value=True)
+ui.slider(min=0, max=10, value=5)
+```
+
+## Layout
+```python
+with ui.header():
+    ui.label('Title')
+
+with ui.left_drawer():
+    ui.button('Nav Item')
+
+with ui.card().classes('w-full'):
+    ui.label('Card content')
+
+with ui.row().classes('gap-4'):
+    with ui.column():
+        # Column 1
+    with ui.column():
+        # Column 2
+```
+
+## Events
+```python
+# Input events
+input.on('update:model-value', lambda e: handle_change(e.value))
+
+# Button events
+button.on('click', lambda: do_something())
+
+# Plotly events
+plot.on('plotly_click', handle_click)
+plot.on('plotly_hover', handle_hover)
+plot.on('plotly_relayout', handle_zoom)
+```
+
+## Notifications
+```python
+ui.notify("Success!", type='positive')
+ui.notify("Info", type='info')
+ui.notify("Warning", type='warning')
+ui.notify("Error!", type='negative')
+```
+
+## Styling
+Use Quasar classes:
+- `'text-h4'`, `'text-h5'`, `'text-h6'` - Headers
+- `'text-subtitle1'`, `'text-subtitle2'` - Subtitles
+- `'text-body1'`, `'text-body2'`, `'text-caption'` - Body text
+- `'w-full'`, `'h-96'` - Width/height
+- `'q-pa-lg'`, `'q-ma-md'` - Padding/margin
+- `'gap-4'`, `'items-center'` - Flexbox utilities
+- `'bg-blue-grey-9'` - Background colors
+
+## Plotly Charts
+```python
+import plotly.graph_objects as go
+
+# IMPORTANT: Convert Timestamps to strings to avoid serialization errors
+df_plot = df.copy()
+df_plot.index = df_plot.index.astype(str)
+
+fig = go.Figure(data=[go.Candlestick(
+    x=df_plot.index,  # Use string index
+    open=df_plot['open'],
+    high=df_plot['high'],
+    low=df_plot['low'],
+    close=df_plot['close']
+)])
+
+ui.plotly(fig).classes('w-full')
+```
+
+# Key Rules
+
+- Pass `app_state` to all render functions
+- Use `ui.navigate.reload()` after state changes to refresh the page
+- Convert pandas Timestamps to strings before passing to Plotly
+- Keep view files lightweight - just compose components
+- Use domain-organized component structure
+- Don't create unnecessary documentation
+- Use NiceGUI's Quasar classes for styling
+
+# Running the Application
+
+```bash
+python main.py
+# Available at http://localhost:8080
+```
