@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from pathlib import Path
 
 from utils.app_init import initialize_pattern_library
+from components.charts.tradingview_chart import create_tradingview_chart
 
 
 def render_label_patterns_tab(app_state):
@@ -116,25 +117,42 @@ def render_label_patterns_tab(app_state):
 
         # Chart card
         with ui.card().classes('w-full'):
-            ui.label('Chart - Click to Select Pattern Start').classes('text-h6')
-            ui.label('Click on any bar to set the pattern start position').classes('text-caption text-grey-7 q-mb-md')
+            ui.label(f'{symbol} - {timeframe}').classes('text-h6')
+            ui.label('Click on any bar to see its stats').classes('text-caption text-grey-7 q-mb-md')
 
-            fig = _create_candlestick_chart_with_pattern(df, start_index, end_index, f"{symbol} - {timeframe}")
+            # Define bar click handler
+            def handle_bar_click(bar_data):
+                """Show dialog with bar statistics."""
+                with ui.dialog() as dialog, ui.card():
+                    ui.label('Bar Statistics').classes('text-h6 q-mb-md')
 
-            # Create plotly chart with click event handler
-            plot = ui.plotly(fig).classes('w-full h-96')
+                    with ui.column().classes('gap-2'):
+                        ui.label(f"Index: {bar_data['index']}").classes('text-body1')
+                        ui.label(f"Time: {bar_data['time']}").classes('text-body1')
+                        ui.separator()
+                        ui.label(f"Open: ${bar_data['open']}").classes('text-body1')
+                        ui.label(f"High: ${bar_data['high']}").classes('text-body1')
+                        ui.label(f"Low: ${bar_data['low']}").classes('text-body1')
+                        ui.label(f"Close: ${bar_data['close']}").classes('text-body1')
+                        ui.separator()
 
-            # Handle click events - NiceGUI allows direct event handling on plotly charts
-            def handle_click(e):
-                """Handle chart click events."""
-                if e.args and 'points' in e.args and len(e.args['points']) > 0:
-                    point = e.args['points'][0]
-                    if 'pointIndex' in point:
-                        clicked_index = point['pointIndex']
-                        app_state['start_index'] = clicked_index
-                        ui.navigate.reload()
+                        # Color code the change percentage
+                        change = float(bar_data['change'])
+                        change_color = 'positive' if change >= 0 else 'negative'
+                        ui.label(f"Change: {change:+.2f}%").classes(f'text-body1 text-{change_color}')
 
-            plot.on('plotly_click', handle_click)
+                    ui.button('Close', on_click=dialog.close).classes('q-mt-md')
+
+                dialog.open()
+
+            # Create TradingView chart with click handler
+            create_tradingview_chart(
+                df=df,
+                start_idx=start_index,
+                end_idx=end_index,
+                height=600,
+                on_bar_click=handle_bar_click
+            )
 
         # Normalized pattern card
         with ui.card().classes('w-full'):
@@ -197,53 +215,6 @@ def render_label_patterns_tab(app_state):
                         ui.label(f'Labels: {labels_str}').classes('text-caption text-grey-7')
 
 
-def _create_candlestick_chart_with_pattern(df: pd.DataFrame, start_idx: int, end_idx: int, title: str):
-    """Create candlestick chart with full data and highlighted pattern region."""
-    # Convert index to strings to avoid Timestamp serialization issues
-    df_plot = df.copy()
-    df_plot.index = df_plot.index.astype(str)
-
-    fig = go.Figure(data=[go.Candlestick(
-        x=df_plot.index,
-        open=df_plot['open'],
-        high=df_plot['high'],
-        low=df_plot['low'],
-        close=df_plot['close'],
-        name='OHLC'
-    )])
-
-    # Add vertical lines to mark pattern boundaries
-    pattern_start = df_plot.index[start_idx]
-    pattern_end = df_plot.index[end_idx - 1] if end_idx > 0 else df_plot.index[start_idx]
-
-    # Add shaded rectangle to highlight pattern region
-    fig.add_vrect(
-        x0=pattern_start,
-        x1=pattern_end,
-        fillcolor="rgba(255, 165, 0, 0.2)",
-        layer="below",
-        line_width=2,
-        line_color="orange",
-        annotation_text="Selected Pattern",
-        annotation_position="top left"
-    )
-
-    fig.update_layout(
-        title=title,
-        xaxis_title="Time",
-        yaxis_title="Price",
-        height=600,
-        xaxis_rangeslider_visible=True,
-        hovermode='x unified',
-        dragmode='pan',
-        template='plotly_dark'
-    )
-
-    # Enable scroll wheel zoom
-    fig.update_xaxes(fixedrange=False)
-    fig.update_yaxes(fixedrange=False)
-
-    return fig
 
 
 def _save_pattern(app_state, pattern_data: pd.DataFrame, label: str, symbol: str, timeframe: str):
