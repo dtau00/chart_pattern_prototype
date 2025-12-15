@@ -18,6 +18,16 @@ app_pages = [
     st.Page("pages/data_manager_parent.py",
             title="Data Manager",
             icon=":material/download:"),
+
+    # Pattern Manager for labeling and managing patterns
+    st.Page("pages/pattern_manager_parent.py",
+            title="Pattern Manager",
+            icon=":material/pattern:"),
+
+    # Pattern Scanner for real-time pattern detection
+    st.Page("pages/pattern_scanner_parent.py",
+            title="Pattern Scanner",
+            icon=":material/search:"),
 ]
 
 # Create and run the navigation menu

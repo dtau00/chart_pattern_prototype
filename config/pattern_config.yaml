@@ -1,0 +1,48 @@
+# DTW + KNN Pattern Recognition Configuration
+
+# DTW Configuration
+dtw:
+  variant: "derivative"               # "derivative" or "standard"
+  constraint: "sakoe_chiba"           # "sakoe_chiba", "adtw", or "none"
+
+  # Sakoe-Chiba parameters (if constraint="sakoe_chiba")
+  sakoe_chiba_window: 0.15            # 15% of sequence length
+
+  # ADTW parameters (if constraint="adtw")
+  amercing_penalty: 0.5               # Fixed additive warping penalty (0.1 - 1.0)
+
+  # Performance optimizations
+  early_abandon: true
+  lb_keogh: true
+  lb_keogh_percentile: 0.2            # Keep top 20% candidates
+
+# Preprocessing
+preprocessing:
+  normalization: "zscore"             # "zscore", "minmax", or "none"
+  pattern_length: 50                  # Default bars per pattern
+
+# KNN Configuration
+knn:
+  k: 5                                # Number of neighbors
+  distance_weighting: true            # Use 1/distance weighting
+
+# Confidence Scoring
+confidence:
+  min_threshold: 0.7                  # Default minimum confidence
+  weights:
+    closeness: 0.35
+    consensus: 0.30
+    separation: 0.20
+    quality: 0.15
+
+# Augmentation
+augmentation:
+  mirror_patterns: true               # Create bullish ↔ bearish
+  sliding_window: false               # Extract sub-patterns
+  sliding_window_step: 5              # If enabled, step size
+
+# Performance
+performance:
+  cache_results: true
+  cache_ttl_minutes: 60
+  max_concurrent_symbols: 10
