@@ -337,11 +337,18 @@ def render_label_patterns_tab(app_state):
 
                 # Add all patterns to overlays, highlighting the current one
                 for idx, pattern_template in enumerate(matching_pattern_templates):
+                    # Extract label as string (handle dict labels)
+                    template_label = pattern_template['template'].label
+                    if isinstance(template_label, dict):
+                        template_label = template_label.get('label', str(template_label))
+                    elif not isinstance(template_label, str):
+                        template_label = str(template_label)
+
                     # Create overlay dict
                     overlay = {
                         'start_idx': pattern_template['start_idx'],
                         'end_idx': pattern_template['end_idx'],
-                        'label': pattern_template['template'].label,
+                        'label': template_label,
                         'pattern_id': pattern_template['template'].id
                     }
 
@@ -391,6 +398,13 @@ def render_label_patterns_tab(app_state):
                 # Get all available labels for dropdown
                 all_labels = library.get_all_labels()
 
+                # Extract template label as string
+                template_label = template.label
+                if isinstance(template_label, dict):
+                    template_label = template_label.get('label', str(template_label))
+                elif not isinstance(template_label, str):
+                    template_label = str(template_label)
+
                 # Show dialog to edit or delete pattern
                 with ui.dialog() as pattern_dialog, ui.card():
                     ui.label('Edit Pattern').classes('text-h6 q-mb-md')
@@ -401,12 +415,12 @@ def render_label_patterns_tab(app_state):
                     ui.label(f"End: {template.end_time}").classes('text-caption text-grey-7 q-mb-md')
 
                     # Dropdown to change pattern label
-                    selected_label = {'value': template.label}
+                    selected_label = {'value': template_label}
 
                     label_select = ui.select(
                         label='Pattern Name',
                         options=all_labels,
-                        value=template.label
+                        value=template_label
                     ).classes('w-full')
 
                     def on_label_change(e):
@@ -421,7 +435,7 @@ def render_label_patterns_tab(app_state):
                         def delete_pattern():
                             library.delete_template(pattern_id)
                             library.save()
-                            ui.notify(f"Pattern '{template.label}' deleted", type='positive')
+                            ui.notify(f"Pattern '{template_label}' deleted", type='positive')
 
                             # Force pattern library to reload from disk on next page load
                             if 'pattern_library' in app_state:
@@ -438,7 +452,7 @@ def render_label_patterns_tab(app_state):
 
                             def save_changes():
                                 new_label = selected_label['value']
-                                if new_label != template.label:
+                                if new_label != template_label:
                                     # Update the label
                                     template.label = new_label
                                     library.save()

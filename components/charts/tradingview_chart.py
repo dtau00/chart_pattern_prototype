@@ -368,6 +368,10 @@ def create_tradingview_chart(
 
             // Check if click is on any edge of any pattern rectangle
             const patternOverlays = {pattern_overlays_json};
+
+            // First pass: Find all matching patterns at this click location
+            const matchingPatterns = [];
+
             for (const pattern of patternOverlays) {{
                 // Get the price range for the pattern
                 const regionData = data.slice(pattern.start_idx, pattern.end_idx);
@@ -375,7 +379,7 @@ def create_tradingview_chart(
                 const minPrice = Math.min(...regionData.map(d => d.low));
                 const priceRange = maxPrice - minPrice;
                 const padding = priceRange * 0.02;
-                const tolerance = priceRange * 0.02; // 2% tolerance for clicking near edge
+                const tolerance = priceRange * 0.10; // 10% tolerance for clicking near edge
 
                 const upperBound = maxPrice + padding;
                 const lowerBound = minPrice - padding;
@@ -383,49 +387,52 @@ def create_tradingview_chart(
                 // Check if click is within the horizontal range of the pattern
                 const isWithinHorizontalRange = barIndex >= pattern.start_idx && barIndex < pattern.end_idx;
 
-                // Check if click is on any of the four edges:
-                let isOnEdge = false;
+                // Check if click is on pattern boundary (edges or anywhere inside/near the rectangle)
+                let isOnPattern = false;
 
-                // 1. Left edge (start bar)
-                if (barIndex === pattern.start_idx && clickPrice >= lowerBound && clickPrice <= upperBound) {{
-                    isOnEdge = true;
+                // Check if click is anywhere within or near the pattern rectangle bounds
+                if (isWithinHorizontalRange && clickPrice >= lowerBound - tolerance && clickPrice <= upperBound + tolerance) {{
+                    isOnPattern = true;
                 }}
 
-                // 2. Right edge (end bar)
-                if (barIndex === pattern.end_idx - 1 && clickPrice >= lowerBound && clickPrice <= upperBound) {{
-                    isOnEdge = true;
+                // Also check vertical edges (left and right)
+                if ((barIndex === pattern.start_idx || barIndex === pattern.end_idx - 1) &&
+                    clickPrice >= lowerBound - tolerance && clickPrice <= upperBound + tolerance) {{
+                    isOnPattern = true;
                 }}
 
-                // 3. Top edge (upper bound line)
-                if (isWithinHorizontalRange && Math.abs(clickPrice - upperBound) <= tolerance) {{
-                    isOnEdge = true;
+                if (isOnPattern) {{
+                    matchingPatterns.push(pattern);
+                }}
+            }}
+
+            // If any patterns matched, prioritize the highlighted one (with green color)
+            if (matchingPatterns.length > 0) {{
+                // Find highlighted pattern (lime green with high opacity)
+                let selectedPattern = matchingPatterns.find(p => p.color === 'rgba(50, 205, 50, 0.8)');
+
+                // If no highlighted pattern, use the first match
+                if (!selectedPattern) {{
+                    selectedPattern = matchingPatterns[0];
                 }}
 
-                // 4. Bottom edge (lower bound line)
-                if (isWithinHorizontalRange && Math.abs(clickPrice - lowerBound) <= tolerance) {{
-                    isOnEdge = true;
-                }}
+                console.log('Pattern clicked:', {{
+                    barIndex: barIndex,
+                    clickPrice: clickPrice,
+                    pattern: selectedPattern.label,
+                    pattern_id: selectedPattern.pattern_id
+                }});
 
-                if (isOnEdge) {{
-                    console.log('Pattern edge clicked:', {{
-                        barIndex: barIndex,
-                        clickPrice: clickPrice,
-                        upperBound: upperBound,
-                        lowerBound: lowerBound,
-                        pattern: pattern.label
-                    }});
-
-                    // Click is on pattern edge
-                    window.dispatchEvent(new CustomEvent('tvChartPatternClick', {{
-                        detail: {{
-                            pattern_id: pattern.pattern_id,
-                            label: pattern.label,
-                            start_idx: pattern.start_idx,
-                            end_idx: pattern.end_idx
-                        }}
-                    }}));
-                    return;  // Don't process as bar click
-                }}
+                // Click is on pattern
+                window.dispatchEvent(new CustomEvent('tvChartPatternClick', {{
+                    detail: {{
+                        pattern_id: selectedPattern.pattern_id,
+                        label: selectedPattern.label,
+                        start_idx: selectedPattern.start_idx,
+                        end_idx: selectedPattern.end_idx
+                    }}
+                }}));
+                return;  // Don't process as bar click
             }}
 
             // If not on pattern edge, handle as bar click
