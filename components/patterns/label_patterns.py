@@ -81,29 +81,131 @@ def render_label_patterns_tab(app_state):
                 current_selection = None
                 app_state['selected_pattern_filter'] = None
 
+            # Collect matching patterns ONCE (for both UI and chart)
+            matching_pattern_templates = []
+            if current_selection is not None:
+                for template in library.templates.values():
+                    template_label = template.label
+                    if isinstance(template_label, dict):
+                        template_label = template_label.get('label', str(template_label))
+                    elif not isinstance(template_label, str):
+                        template_label = str(template_label)
+
+                    if (template_label == current_selection and
+                        template.symbol == symbol and
+                        template.timeframe == timeframe):
+                        # Find the pattern's position in the current dataframe
+                        try:
+                            # Match by timestamp
+                            start_time = pd.Timestamp(template.start_time)
+                            end_time = pd.Timestamp(template.end_time)
+
+                            if start_time in df.index and end_time in df.index:
+                                start_pos = df.index.get_loc(start_time)
+                                end_pos = df.index.get_loc(end_time)
+
+                                matching_pattern_templates.append({
+                                    'template': template,
+                                    'start_idx': start_pos,
+                                    'end_idx': end_pos + 1,
+                                    'start_time': start_time,
+                                    'end_time': end_time
+                                })
+                        except (KeyError, ValueError):
+                            # Pattern not found in current data range, skip it
+                            pass
+
+                # Sort patterns by start index to maintain consistent ordering
+                matching_pattern_templates.sort(key=lambda x: x['start_idx'])
+
             if all_labels:
                 with ui.element('div').style('border: 2px solid #4FC3F7; background-color: transparent; border-radius: 4px; padding: 8px; display: inline-block; margin-top: 8px;'):
-                    # Create dropdown options with "None" as first option
-                    pattern_options = ['-- None --'] + all_labels
+                    with ui.row().classes('items-center gap-2'):
+                        # Create dropdown options with "None" as first option
+                        pattern_options = ['-- None --'] + all_labels
 
-                    # Ensure current_selection is valid
-                    if current_selection not in all_labels:
-                        current_selection = None
+                        # Ensure current_selection is valid
+                        if current_selection not in all_labels:
+                            current_selection = None
 
-                    dropdown_value = '-- None --' if current_selection is None else current_selection
+                        dropdown_value = '-- None --' if current_selection is None else current_selection
 
-                    pattern_select = ui.select(
-                        label='Show Pattern',
-                        options=pattern_options,
-                        value=dropdown_value
-                    ).classes('w-64')
+                        pattern_select = ui.select(
+                            label='Show Pattern',
+                            options=pattern_options,
+                            value=dropdown_value
+                        ).classes('w-64')
 
-                    def on_pattern_select(e):
-                        selected = e.args
-                        app_state['selected_pattern_filter'] = None if selected == '-- None --' else selected
-                        ui.navigate.reload()
+                        def on_pattern_select(e):
+                            selected = e.args
+                            app_state['selected_pattern_filter'] = None if selected == '-- None --' else selected
+                            # Reset current pattern index when changing filter
+                            app_state['current_pattern_index'] = 0
+                            ui.navigate.reload()
 
-                    pattern_select.on('update:model-value', on_pattern_select)
+                        pattern_select.on('update:model-value', on_pattern_select)
+
+                        # Navigation buttons (only show when a pattern is selected)
+                        if current_selection is not None:
+                            # Always show navigation if patterns exist
+                            if len(matching_pattern_templates) >= 1:
+                                # Initialize current pattern index
+                                current_idx = app_state.get('current_pattern_index', 0)
+                                # Ensure index is within bounds
+                                current_idx = max(0, min(current_idx, len(matching_pattern_templates) - 1))
+                                app_state['current_pattern_index'] = current_idx
+
+                                # Navigation buttons
+                                def go_to_previous():
+                                    app_state['current_pattern_index'] = max(0, current_idx - 1)
+                                    ui.navigate.reload()
+
+                                def go_to_next():
+                                    app_state['current_pattern_index'] = min(len(matching_pattern_templates) - 1, current_idx + 1)
+                                    ui.navigate.reload()
+
+                                # Visual separator
+                                ui.separator().props('vertical').classes('q-mx-md')
+
+                                # Create buttons with conditional enabling
+                                prev_btn = ui.button(
+                                    icon='chevron_left',
+                                    on_click=go_to_previous
+                                ).props('round').props('size=sm')
+                                if current_idx == 0:
+                                    prev_btn.props('disable')
+
+                                ui.label(f'{current_idx + 1} / {len(matching_pattern_templates)}').classes('text-subtitle2 q-mx-sm')
+
+                                next_btn = ui.button(
+                                    icon='chevron_right',
+                                    on_click=go_to_next
+                                ).props('round').props('size=sm')
+                                if current_idx >= len(matching_pattern_templates) - 1:
+                                    next_btn.props('disable')
+
+                                # Go to pattern index input
+                                ui.separator().props('vertical').classes('q-mx-md')
+
+                                # Create a simple text input instead of number input to avoid arrow button confusion
+                                goto_input = ui.input(
+                                    label='Go to',
+                                    value=str(current_idx + 1),
+                                    validation={'Please enter a valid number': lambda value: value.isdigit() and 1 <= int(value) <= len(matching_pattern_templates)}
+                                ).classes('w-20').props('dense')
+
+                                def go_to_index():
+                                    try:
+                                        target_idx = int(goto_input.value) - 1  # Convert from 1-based to 0-based
+                                        if 0 <= target_idx < len(matching_pattern_templates):
+                                            app_state['current_pattern_index'] = target_idx
+                                            ui.navigate.reload()
+                                        else:
+                                            ui.notify(f'Please enter a number between 1 and {len(matching_pattern_templates)}', type='warning')
+                                    except (ValueError, TypeError):
+                                        ui.notify('Please enter a valid number', type='warning')
+
+                                ui.button('Go', on_click=go_to_index).props('dense')
 
             # Define context menu handler
             def handle_context_menu(event_data):
@@ -219,42 +321,48 @@ def render_label_patterns_tab(app_state):
 
             # Prepare pattern overlays based on selected pattern filter
             pattern_overlays = []
-            selected_pattern_label = app_state.get('selected_pattern_filter', None)
 
-            if selected_pattern_label is not None:
-                library = app_state['pattern_library']
-                # Get all patterns that match the selected label, symbol, and timeframe
-                for template in library.templates.values():
-                    # Normalize template label to string for comparison
-                    template_label = template.label
-                    if isinstance(template_label, dict):
-                        template_label = template_label.get('label', str(template_label))
-                    elif not isinstance(template_label, str):
-                        template_label = str(template_label)
+            if len(matching_pattern_templates) > 0:
+                # Get current pattern index
+                current_pattern_idx = app_state.get('current_pattern_index', 0)
+                current_pattern_idx = max(0, min(current_pattern_idx, len(matching_pattern_templates) - 1))
 
-                    if (template_label == selected_pattern_label and
-                        template.symbol == symbol and
-                        template.timeframe == timeframe):
-                        # Find the pattern's position in the current dataframe
-                        try:
-                            # Match by timestamp
-                            start_time = pd.Timestamp(template.start_time)
-                            end_time = pd.Timestamp(template.end_time)
+                # Add all patterns to overlays, highlighting the current one
+                for idx, pattern_template in enumerate(matching_pattern_templates):
+                    # Create overlay dict
+                    overlay = {
+                        'start_idx': pattern_template['start_idx'],
+                        'end_idx': pattern_template['end_idx'],
+                        'label': pattern_template['template'].label,
+                        'pattern_id': pattern_template['template'].id
+                    }
 
-                            if start_time in df.index and end_time in df.index:
-                                start_pos = df.index.get_loc(start_time)
-                                end_pos = df.index.get_loc(end_time)
+                    # Highlight current pattern with different color and opacity
+                    if idx == current_pattern_idx:
+                        overlay['color'] = 'rgba(50, 205, 50, 0.8)'  # Lime green for current pattern
 
-                                pattern_overlays.append({
-                                    'start_idx': start_pos,
-                                    'end_idx': end_pos + 1,
-                                    'label': template.label,
-                                    'color': 'rgba(79, 195, 247, 0.2)',  # Light blue with transparency
-                                    'pattern_id': template.id  # Add pattern ID for click detection
-                                })
-                        except (KeyError, ValueError):
-                            # Pattern not found in current data range, skip it
-                            pass
+                        # Set visible range to center on this pattern
+                        pattern_length = pattern_template['end_idx'] - pattern_template['start_idx']
+                        context_bars = max(pattern_length * 2, 50)  # Show 2x pattern length or min 50 bars
+
+                        # Calculate visible range indices
+                        center_idx = (pattern_template['start_idx'] + pattern_template['end_idx']) // 2
+                        range_start_idx = max(0, center_idx - context_bars // 2)
+                        range_end_idx = min(len(df) - 1, center_idx + context_bars // 2)
+
+                        # Convert to timestamps (Unix timestamp in seconds)
+                        range_start_time = int(df.index[range_start_idx].timestamp())
+                        range_end_time = int(df.index[range_end_idx].timestamp())
+
+                        # Update the saved range to center on current pattern
+                        app_state['_chart_visible_range'] = {
+                            'from': range_start_time,
+                            'to': range_end_time
+                        }
+                    else:
+                        overlay['color'] = 'rgba(50, 205, 50, 0.5)'  # Dimmer lime green for other patterns
+
+                    pattern_overlays.append(overlay)
 
             # Define handler for pattern rectangle clicks
             def handle_pattern_click(pattern_data):

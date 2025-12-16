@@ -239,8 +239,8 @@ def create_tradingview_chart(
         // Draw pattern overlays
         const patternOverlays = {pattern_overlays_json};
         patternOverlays.forEach((pattern) => {{
-            const color = pattern.color.replace('0.2', '0.8');  // More opaque for border
-            drawRectangle(pattern.start_idx, pattern.end_idx, color, 1, 1);
+            const color = pattern.color //.replace('0.5', '0.8');  // More opaque for border
+            drawRectangle(pattern.start_idx, pattern.end_idx, color, 2, 1);
         }});
 
         // Create context menu HTML
@@ -565,6 +565,9 @@ def _prepare_candlestick_data(df: pd.DataFrame):
     """Convert DataFrame to TradingView format."""
     data = []
     df_copy = df.copy()
+
+    # Filter out rows with invalid/null OHLC prices (weekends/holidays)
+    #df_copy = df_copy.dropna(subset=['open', 'high', 'low', 'close'])
 
     # Convert timestamps to Unix timestamps (seconds)
     if isinstance(df_copy.index, pd.DatetimeIndex):
