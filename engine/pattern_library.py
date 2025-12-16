@@ -170,6 +170,22 @@ class PatternLibrary:
         """Get total number of templates."""
         return len(self.templates)
 
+    def delete_template(self, template_id: str) -> bool:
+        """
+        Delete a template from the library.
+
+        Args:
+            template_id: ID of the template to delete
+
+        Returns:
+            True if template was deleted, False if not found
+        """
+        if template_id in self.templates:
+            del self.templates[template_id]
+            self.index_dirty = True
+            return True
+        return False
+
     def save(self):
         """Persist library to disk."""
         library_file = self.storage_path / "library.pkl"

@@ -66,19 +66,44 @@ def render_label_patterns_tab(app_state):
             ui.label(f'{symbol} - {timeframe}').classes('text-h6')
             ui.label('Right-click on a bar to set start/end date').classes('text-caption text-grey-7')
 
-            # Pattern overlay toggle
-            if 'show_all_patterns' not in app_state:
-                app_state['show_all_patterns'] = False
+            # Pattern overlay selector
+            library = app_state['pattern_library']
+            all_labels = library.get_all_labels()
 
-            with ui.element('div').style('border: 2px solid #4FC3F7; background-color: transparent; border-radius: 4px; padding: 8px; display: inline-block; margin-top: 8px;'):
-                show_patterns_checkbox = ui.checkbox('Show all existing patterns', value=app_state.get('show_all_patterns', False))
+            # Ensure selected_pattern_filter is a string or None (fix corrupted data)
+            current_selection = app_state.get('selected_pattern_filter', None)
+            if isinstance(current_selection, dict):
+                # Handle corrupted data - try to extract label or reset to None
+                current_selection = current_selection.get('label', None) if isinstance(current_selection.get('label'), str) else None
+                app_state['selected_pattern_filter'] = current_selection
+            elif not isinstance(current_selection, (str, type(None))):
+                # Reset if it's some other type
+                current_selection = None
+                app_state['selected_pattern_filter'] = None
 
-                def toggle_patterns(e):
-                    # e.args contains the new value for update:model-value event
-                    app_state['show_all_patterns'] = e.args
-                    ui.navigate.reload()
+            if all_labels:
+                with ui.element('div').style('border: 2px solid #4FC3F7; background-color: transparent; border-radius: 4px; padding: 8px; display: inline-block; margin-top: 8px;'):
+                    # Create dropdown options with "None" as first option
+                    pattern_options = ['-- None --'] + all_labels
 
-                show_patterns_checkbox.on('update:model-value', toggle_patterns)
+                    # Ensure current_selection is valid
+                    if current_selection not in all_labels:
+                        current_selection = None
+
+                    dropdown_value = '-- None --' if current_selection is None else current_selection
+
+                    pattern_select = ui.select(
+                        label='Show Pattern',
+                        options=pattern_options,
+                        value=dropdown_value
+                    ).classes('w-64')
+
+                    def on_pattern_select(e):
+                        selected = e.args
+                        app_state['selected_pattern_filter'] = None if selected == '-- None --' else selected
+                        ui.navigate.reload()
+
+                    pattern_select.on('update:model-value', on_pattern_select)
 
             # Define context menu handler
             def handle_context_menu(event_data):
@@ -189,13 +214,17 @@ def render_label_patterns_tab(app_state):
             # Get the start index from state (if set)
             pattern_start = app_state.get('_pattern_start_index', None)
 
-            # Prepare pattern overlays if enabled
+            # Prepare pattern overlays based on selected pattern filter
             pattern_overlays = []
-            if app_state.get('show_all_patterns', False):
+            selected_pattern_label = app_state.get('selected_pattern_filter', None)
+
+            if selected_pattern_label is not None:
                 library = app_state['pattern_library']
-                # Get all patterns that match the current symbol and timeframe
+                # Get all patterns that match the selected label, symbol, and timeframe
                 for template in library.templates.values():
-                    if template.symbol == symbol and template.timeframe == timeframe:
+                    if (template.label == selected_pattern_label and
+                        template.symbol == symbol and
+                        template.timeframe == timeframe):
                         # Find the pattern's position in the current dataframe
                         try:
                             # Match by timestamp
@@ -210,21 +239,94 @@ def render_label_patterns_tab(app_state):
                                     'start_idx': start_pos,
                                     'end_idx': end_pos + 1,
                                     'label': template.label,
-                                    'color': 'rgba(79, 195, 247, 0.2)'  # Light blue with transparency
+                                    'color': 'rgba(79, 195, 247, 0.2)',  # Light blue with transparency
+                                    'pattern_id': template.id  # Add pattern ID for click detection
                                 })
                         except (KeyError, ValueError):
                             # Pattern not found in current data range, skip it
                             pass
+
+            # Define handler for pattern rectangle clicks
+            def handle_pattern_click(pattern_data):
+                """Handle clicks on pattern rectangles."""
+                pattern_id = pattern_data.get('pattern_id')
+                if not pattern_id:
+                    return
+
+                # Get the pattern from library
+                library = app_state['pattern_library']
+                template = library.templates.get(pattern_id)
+                if not template:
+                    ui.notify("Pattern not found", type='warning')
+                    return
+
+                # Get all available labels for dropdown
+                all_labels = library.get_all_labels()
+
+                # Show dialog to edit or delete pattern
+                with ui.dialog() as pattern_dialog, ui.card():
+                    ui.label('Edit Pattern').classes('text-h6 q-mb-md')
+
+                    # Show pattern info
+                    ui.label(f"Pattern ID: {template.id[:8]}...").classes('text-caption text-grey-7')
+                    ui.label(f"Start: {template.start_time}").classes('text-caption text-grey-7')
+                    ui.label(f"End: {template.end_time}").classes('text-caption text-grey-7 q-mb-md')
+
+                    # Dropdown to change pattern label
+                    selected_label = {'value': template.label}
+
+                    label_select = ui.select(
+                        label='Pattern Name',
+                        options=all_labels,
+                        value=template.label
+                    ).classes('w-full')
+
+                    def on_label_change(e):
+                        selected_label['value'] = e.args if hasattr(e, 'args') else e.value
+
+                    label_select.on('update:model-value', on_label_change)
+
+                    ui.separator().classes('q-my-md')
+
+                    with ui.row().classes('w-full justify-between gap-2'):
+                        # Delete button on the left
+                        def delete_pattern():
+                            library.delete_template(pattern_id)
+                            library.save()
+                            ui.notify(f"Pattern '{template.label}' deleted", type='positive')
+                            pattern_dialog.close()
+                            ui.navigate.reload()
+
+                        ui.button('Delete', on_click=delete_pattern, color='negative')
+
+                        # Cancel and Save buttons on the right
+                        with ui.row().classes('gap-2'):
+                            ui.button('Cancel', on_click=pattern_dialog.close).props('flat')
+
+                            def save_changes():
+                                new_label = selected_label['value']
+                                if new_label != template.label:
+                                    # Update the label
+                                    template.label = new_label
+                                    library.save()
+                                    ui.notify(f"Pattern label updated to '{new_label}'", type='positive')
+                                pattern_dialog.close()
+                                ui.navigate.reload()
+
+                            ui.button('Save', on_click=save_changes, color='primary')
+
+                pattern_dialog.open()
 
             create_tradingview_chart(
                 df=df,
                 start_idx=pattern_start if pattern_start is not None else 0,
                 end_idx=None,  # No end until user sets it
                 height=600,
-                on_bar_click=None,  # No left-click handler
+                on_bar_click=None,  # No left-click handler for bars
                 on_context_menu=handle_context_menu,
                 app_state=app_state,  # Pass app_state to preserve zoom/pan
-                pattern_overlays=pattern_overlays  # Pass pattern overlays
+                pattern_overlays=pattern_overlays,  # Pass pattern overlays
+                on_pattern_click=handle_pattern_click  # Handle pattern rectangle clicks
             )
 
         # Pattern library statistics

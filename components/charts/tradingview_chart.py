@@ -14,7 +14,8 @@ def create_tradingview_chart(
     on_bar_click: Optional[callable] = None,
     on_context_menu: Optional[callable] = None,
     app_state: Optional[dict] = None,
-    pattern_overlays: Optional[list] = None
+    pattern_overlays: Optional[list] = None,
+    on_pattern_click: Optional[callable] = None
 ) -> None:
     """
     Create a TradingView candlestick chart with pattern highlighting.
@@ -27,7 +28,8 @@ def create_tradingview_chart(
         on_bar_click: Optional callback function when a bar is clicked
         on_context_menu: Optional callback function when a context menu item is selected
         app_state: Optional app state to persist zoom/pan position across reloads
-        pattern_overlays: Optional list of pattern overlay dicts with keys: start_idx, end_idx, label, color
+        pattern_overlays: Optional list of pattern overlay dicts with keys: start_idx, end_idx, label, color, pattern_id
+        on_pattern_click: Optional callback function when a pattern rectangle is clicked
     """
     if end_idx is None:
         end_idx = len(df)
@@ -353,31 +355,101 @@ def create_tradingview_chart(
         chart.subscribeClick(param => {{
             if (!param.point || !param.time) return;
 
+            const barIndex = data.findIndex(d => d.time === param.time);
+            if (barIndex < 0) return;
+
+            // Get the clicked bar's price data
             const price = param.seriesData.get(candlestickSeries);
-            if (price) {{
-                const barIndex = data.findIndex(d => d.time === param.time);
-                if (barIndex >= 0) {{
-                    const barData = data[barIndex];
+            if (!price) return;
 
-                    // Create timestamp string
-                    const date = new Date(barData.time * 1000);
-                    const timeStr = date.toLocaleString();
+            // Get click Y coordinate and convert to price
+            const clickY = param.point.y;
+            const clickPrice = candlestickSeries.coordinateToPrice(clickY);
 
-                    const eventData = {{
-                        index: barData.index,
-                        time: timeStr,
-                        open: barData.open.toFixed(2),
-                        high: barData.high.toFixed(2),
-                        low: barData.low.toFixed(2),
-                        close: barData.close.toFixed(2),
-                        change: ((barData.close - barData.open) / barData.open * 100).toFixed(2)
-                    }};
+            // Check if click is on any edge of any pattern rectangle
+            const patternOverlays = {pattern_overlays_json};
+            for (const pattern of patternOverlays) {{
+                // Get the price range for the pattern
+                const regionData = data.slice(pattern.start_idx, pattern.end_idx);
+                const maxPrice = Math.max(...regionData.map(d => d.high));
+                const minPrice = Math.min(...regionData.map(d => d.low));
+                const priceRange = maxPrice - minPrice;
+                const padding = priceRange * 0.02;
+                const tolerance = priceRange * 0.02; // 2% tolerance for clicking near edge
 
-                    // Send data to Python
-                    window.dispatchEvent(new CustomEvent('tvChartClick', {{
-                        detail: eventData
-                    }}));
+                const upperBound = maxPrice + padding;
+                const lowerBound = minPrice - padding;
+
+                // Check if click is within the horizontal range of the pattern
+                const isWithinHorizontalRange = barIndex >= pattern.start_idx && barIndex < pattern.end_idx;
+
+                // Check if click is on any of the four edges:
+                let isOnEdge = false;
+
+                // 1. Left edge (start bar)
+                if (barIndex === pattern.start_idx && clickPrice >= lowerBound && clickPrice <= upperBound) {{
+                    isOnEdge = true;
                 }}
+
+                // 2. Right edge (end bar)
+                if (barIndex === pattern.end_idx - 1 && clickPrice >= lowerBound && clickPrice <= upperBound) {{
+                    isOnEdge = true;
+                }}
+
+                // 3. Top edge (upper bound line)
+                if (isWithinHorizontalRange && Math.abs(clickPrice - upperBound) <= tolerance) {{
+                    isOnEdge = true;
+                }}
+
+                // 4. Bottom edge (lower bound line)
+                if (isWithinHorizontalRange && Math.abs(clickPrice - lowerBound) <= tolerance) {{
+                    isOnEdge = true;
+                }}
+
+                if (isOnEdge) {{
+                    console.log('Pattern edge clicked:', {{
+                        barIndex: barIndex,
+                        clickPrice: clickPrice,
+                        upperBound: upperBound,
+                        lowerBound: lowerBound,
+                        pattern: pattern.label
+                    }});
+
+                    // Click is on pattern edge
+                    window.dispatchEvent(new CustomEvent('tvChartPatternClick', {{
+                        detail: {{
+                            pattern_id: pattern.pattern_id,
+                            label: pattern.label,
+                            start_idx: pattern.start_idx,
+                            end_idx: pattern.end_idx
+                        }}
+                    }}));
+                    return;  // Don't process as bar click
+                }}
+            }}
+
+            // If not on pattern edge, handle as bar click
+            if (price) {{
+                const barData = data[barIndex];
+
+                // Create timestamp string
+                const date = new Date(barData.time * 1000);
+                const timeStr = date.toLocaleString();
+
+                const eventData = {{
+                    index: barData.index,
+                    time: timeStr,
+                    open: barData.open.toFixed(2),
+                    high: barData.high.toFixed(2),
+                    low: barData.low.toFixed(2),
+                    close: barData.close.toFixed(2),
+                    change: ((barData.close - barData.open) / barData.open * 100).toFixed(2)
+                }};
+
+                // Send data to Python
+                window.dispatchEvent(new CustomEvent('tvChartClick', {{
+                    detail: eventData
+                }}));
             }}
         }});
 
@@ -454,6 +526,21 @@ def create_tradingview_chart(
 
         # Attach Python event handler
         ui.on(context_event_name, lambda e: on_context_menu(e.args))
+
+    # If pattern click callback provided, create event listener
+    if on_pattern_click:
+        pattern_event_name = f'{chart_id}_pattern_click'
+
+        # Set up JavaScript event listener to bridge to Python
+        pattern_emit_script = f'''
+        window.addEventListener('tvChartPatternClick', (event) => {{
+            emitEvent('{pattern_event_name}', event.detail);
+        }});
+        '''
+        ui.run_javascript(pattern_emit_script)
+
+        # Attach Python event handler
+        ui.on(pattern_event_name, lambda e: on_pattern_click(e.args))
 
     # If app_state provided, set up event listener to save zoom/pan position
     if app_state is not None:
