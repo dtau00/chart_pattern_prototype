@@ -136,7 +136,7 @@ def render_label_patterns_tab(app_state):
                             ui.label(f"Pattern length: {new_length} bars").classes('text-caption text-grey-7 q-mb-md')
 
                             # Dropdown for existing labels or custom input
-                            selected_label = {'value': existing_labels[0] if existing_labels else ''}
+                            selected_label = {'value': ''}
                             custom_label = {'value': ''}
 
                             if existing_labels:
@@ -146,7 +146,7 @@ def render_label_patterns_tab(app_state):
                                 label_select = ui.select(
                                     label='Select Existing Pattern Label',
                                     options=label_options,
-                                    value=label_options[0]
+                                    value='-- Create New --'
                                 ).classes('w-full')
 
                                 def on_label_select(e):
@@ -154,25 +154,24 @@ def render_label_patterns_tab(app_state):
                                     selected_label['value'] = value if value != '-- Create New --' else ''
                                     if value == '-- Create New --':
                                         custom_input.set_visibility(True)
+                                        custom_label['value'] = ''  # Clear custom label when switching to "Create New"
                                     else:
                                         custom_input.set_visibility(False)
+                                        custom_input.set_value('')  # Clear the input field
                                         custom_label['value'] = ''
 
                                 label_select.on('update:model-value', on_label_select)
                             else:
                                 ui.label('No existing patterns. Create a new label:').classes('text-body2 q-mb-sm')
 
-                            # Custom label input
+                            # Custom label input (always created)
                             custom_input = ui.input(
                                 label='Custom Pattern Label',
                                 placeholder='e.g., head_and_shoulders, double_top'
                             ).classes('w-full')
 
-                            # Show custom input by default if no existing labels or "Create New" selected
-                            if not existing_labels:
-                                custom_input.set_visibility(True)
-                            else:
-                                custom_input.set_visibility(False)
+                            # Show custom input by default (for "Create New" or no existing labels)
+                            custom_input.set_visibility(True)
 
                             def on_custom_input(e):
                                 custom_label['value'] = e.args
