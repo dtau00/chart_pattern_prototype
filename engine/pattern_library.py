@@ -154,7 +154,17 @@ class PatternLibrary:
 
     def get_all_labels(self) -> List[str]:
         """Get list of all unique labels."""
-        return sorted(set(t.label for t in self.templates.values()))
+        labels = []
+        for t in self.templates.values():
+            # Handle case where label might be corrupted/wrong type
+            if isinstance(t.label, str):
+                labels.append(t.label)
+            elif isinstance(t.label, dict):
+                # Try to extract label from dict if it's stored that way
+                labels.append(t.label.get('label', str(t.label)))
+            else:
+                labels.append(str(t.label))
+        return sorted(set(labels))
 
     def get_template_count(self) -> int:
         """Get total number of templates."""

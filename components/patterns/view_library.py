@@ -102,20 +102,32 @@ def _display_templates(app_state, library, selected_label):
     else:
         templates = library.get_templates_by_label(selected_label)
 
-    templates.sort(key=lambda t: t.label)
+    # Sort templates, handling cases where label might be dict or other types
+    def get_label_str(t):
+        if isinstance(t.label, str):
+            return t.label
+        elif isinstance(t.label, dict):
+            return t.label.get('label', str(t.label))
+        else:
+            return str(t.label)
+
+    templates.sort(key=get_label_str)
 
     ui.label(f'Showing {len(templates)} pattern(s)').classes('text-subtitle1 q-mt-md')
 
     for template in templates:
+        # Get label as string for display
+        label_str = get_label_str(template)
+
         with ui.expansion(
-            f"{template.label} - {template.symbol} {template.timeframe} ({template.bars_count} bars) - Quality: {template.quality_score:.2f}",
+            f"{label_str} - {template.symbol} {template.timeframe} ({template.bars_count} bars) - Quality: {template.quality_score:.2f}",
             icon='pattern'
         ).classes('w-full'):
             with ui.row().classes('w-full gap-4'):
                 with ui.column():
                     ui.label('Pattern Info').classes('text-subtitle2')
                     ui.label(f"ID: {template.id[:16]}...")
-                    ui.label(f"Label: {template.label}")
+                    ui.label(f"Label: {label_str}")
                     ui.label(f"Bars: {template.bars_count}")
                     ui.label(f"Quality: {template.quality_score:.3f}")
 

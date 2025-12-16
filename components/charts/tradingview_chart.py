@@ -11,7 +11,9 @@ def create_tradingview_chart(
     start_idx: int = 0,
     end_idx: Optional[int] = None,
     height: int = 600,
-    on_bar_click: Optional[callable] = None
+    on_bar_click: Optional[callable] = None,
+    on_context_menu: Optional[callable] = None,
+    app_state: Optional[dict] = None
 ) -> None:
     """
     Create a TradingView candlestick chart with pattern highlighting.
@@ -22,6 +24,8 @@ def create_tradingview_chart(
         end_idx: End index of pattern region
         height: Chart height in pixels
         on_bar_click: Optional callback function when a bar is clicked
+        on_context_menu: Optional callback function when a context menu item is selected
+        app_state: Optional app state to persist zoom/pan position across reloads
     """
     if end_idx is None:
         end_idx = len(df)
@@ -45,6 +49,12 @@ def create_tradingview_chart(
     data_json = json.dumps(candlestick_data)
     markers_json = json.dumps(markers)
 
+    # Get saved visible range from app_state if available
+    saved_range = None
+    if app_state is not None:
+        saved_range = app_state.get('_chart_visible_range', None)
+    saved_range_json = json.dumps(saved_range) if saved_range else 'null'
+
     # Create JavaScript for chart
     chart_script = f'''
     (function() {{
@@ -63,8 +73,8 @@ def create_tradingview_chart(
                 textColor: '#d1d4dc',
             }},
             grid: {{
-                vertLines: {{ color: '#2a2e39' }},
-                horzLines: {{ color: '#2a2e39' }},
+                vertLines: {{ visible: false }},
+                horzLines: {{ visible: false }},
             }},
             crosshair: {{
                 mode: LightweightCharts.CrosshairMode.Normal,
@@ -86,6 +96,8 @@ def create_tradingview_chart(
             borderVisible: false,
             wickUpColor: '#26a69a',
             wickDownColor: '#ef5350',
+            priceLineVisible: false,
+            lastValueVisible: false,
         }});
 
         // Set data
@@ -139,9 +151,134 @@ def create_tradingview_chart(
                 {{ time: startTime, value: minPrice - priceRange * 0.02 }},
                 {{ time: endTime, value: minPrice - priceRange * 0.02 }}
             ]);
+
+            // Add vertical line at start index
+            const startBar = data[highlightStart];
+            const startVerticalLine = chart.addLineSeries({{
+                color: '#00ff00',
+                lineWidth: 2,
+                lineStyle: 2, // Dashed line
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            }});
+
+            // Create vertical line effect by drawing from min to max price at start time
+            startVerticalLine.setData([
+                {{ time: startTime, value: minPrice - priceRange * 0.05 }},
+                {{ time: startTime, value: maxPrice + priceRange * 0.05 }}
+            ]);
         }}
 
-        // Handle click events
+        // Create context menu HTML
+        const contextMenu = document.createElement('div');
+        contextMenu.id = '{chart_id}_contextmenu';
+        contextMenu.style.cssText = `
+            position: fixed;
+            display: none;
+            background: #2a2e39;
+            border: 1px solid #434651;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            z-index: 10000;
+            padding: 4px 0;
+            min-width: 150px;
+        `;
+
+        const menuItems = [
+            {{ label: 'Set Start Date', action: 'start_date' }},
+            {{ label: 'Set End Date', action: 'end_date' }}
+        ];
+
+        menuItems.forEach(item => {{
+            const menuItem = document.createElement('div');
+            menuItem.textContent = item.label;
+            menuItem.style.cssText = `
+                padding: 8px 16px;
+                cursor: pointer;
+                color: #d1d4dc;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                font-size: 14px;
+            `;
+            menuItem.addEventListener('mouseenter', () => {{
+                menuItem.style.background = '#434651';
+            }});
+            menuItem.addEventListener('mouseleave', () => {{
+                menuItem.style.background = 'transparent';
+            }});
+            menuItem.dataset.action = item.action;
+            contextMenu.appendChild(menuItem);
+        }});
+
+        document.body.appendChild(contextMenu);
+
+        // Store context menu data
+        let contextMenuData = null;
+
+        // Handle right-click on chart
+        chartDiv.addEventListener('contextmenu', (e) => {{
+            e.preventDefault();
+
+            // Get the position within the chart
+            const rect = chartDiv.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Get the time at this position
+            const timeScale = chart.timeScale();
+            const time = timeScale.coordinateToTime(x);
+
+            if (time) {{
+                // Find the bar data
+                const barIndex = data.findIndex(d => d.time === time);
+                if (barIndex >= 0) {{
+                    const barData = data[barIndex];
+
+                    // Store the bar data
+                    contextMenuData = {{
+                        index: barData.index,
+                        time: new Date(barData.time * 1000).toLocaleString(),
+                        open: barData.open.toFixed(2),
+                        high: barData.high.toFixed(2),
+                        low: barData.low.toFixed(2),
+                        close: barData.close.toFixed(2),
+                        change: ((barData.close - barData.open) / barData.open * 100).toFixed(2)
+                    }};
+
+                    // Show context menu at cursor position
+                    contextMenu.style.display = 'block';
+                    contextMenu.style.left = e.clientX + 'px';
+                    contextMenu.style.top = e.clientY + 'px';
+                }}
+            }}
+        }});
+
+        // Handle context menu item clicks
+        contextMenu.addEventListener('click', (e) => {{
+            const menuItem = e.target.closest('div[data-action]');
+            if (menuItem && contextMenuData) {{
+                const action = menuItem.dataset.action;
+
+                // Send event to Python with action type
+                window.dispatchEvent(new CustomEvent('tvChartContextMenu', {{
+                    detail: {{
+                        ...contextMenuData,
+                        action: action
+                    }}
+                }}));
+
+                // Hide menu
+                contextMenu.style.display = 'none';
+                contextMenuData = null;
+            }}
+        }});
+
+        // Hide context menu when clicking elsewhere
+        document.addEventListener('click', () => {{
+            contextMenu.style.display = 'none';
+        }});
+
+        // Handle regular click events (left-click)
         chart.subscribeClick(param => {{
             if (!param.point || !param.time) return;
 
@@ -181,8 +318,33 @@ def create_tradingview_chart(
         }});
         resizeObserver.observe(chartDiv);
 
-        // Fit content to view
-        setTimeout(() => chart.timeScale().fitContent(), 100);
+        // Restore saved zoom/pan or fit content
+        const savedRange = {saved_range_json};
+        if (savedRange && savedRange.from && savedRange.to) {{
+            setTimeout(() => {{
+                chart.timeScale().setVisibleRange({{
+                    from: savedRange.from,
+                    to: savedRange.to
+                }});
+            }}, 100);
+        }} else {{
+            // Fit content to view on first load
+            setTimeout(() => chart.timeScale().fitContent(), 100);
+        }}
+
+        // Save visible range when user zooms/pans
+        chart.timeScale().subscribeVisibleTimeRangeChange(() => {{
+            const visibleRange = chart.timeScale().getVisibleRange();
+            if (visibleRange) {{
+                // Send to Python to save in app_state
+                window.dispatchEvent(new CustomEvent('tvChartRangeChange', {{
+                    detail: {{
+                        from: visibleRange.from,
+                        to: visibleRange.to
+                    }}
+                }}));
+            }}
+        }});
     }})();
     '''
 
@@ -206,6 +368,39 @@ def create_tradingview_chart(
 
         # Attach Python event handler
         ui.on(event_name, lambda e: on_bar_click(e.args))
+
+    # If context menu callback provided, create event listener
+    if on_context_menu:
+        context_event_name = f'{chart_id}_contextmenu'
+
+        # Set up JavaScript event listener to bridge to Python
+        context_emit_script = f'''
+        window.addEventListener('tvChartContextMenu', (event) => {{
+            emitEvent('{context_event_name}', event.detail);
+        }});
+        '''
+        ui.run_javascript(context_emit_script)
+
+        # Attach Python event handler
+        ui.on(context_event_name, lambda e: on_context_menu(e.args))
+
+    # If app_state provided, set up event listener to save zoom/pan position
+    if app_state is not None:
+        range_event_name = f'{chart_id}_range'
+
+        # Set up JavaScript event listener to bridge to Python
+        range_emit_script = f'''
+        window.addEventListener('tvChartRangeChange', (event) => {{
+            emitEvent('{range_event_name}', event.detail);
+        }});
+        '''
+        ui.run_javascript(range_emit_script)
+
+        # Attach Python event handler to save visible range
+        def save_visible_range(e):
+            app_state['_chart_visible_range'] = e.args
+
+        ui.on(range_event_name, save_visible_range)
 
 
 def _prepare_candlestick_data(df: pd.DataFrame):
@@ -248,16 +443,6 @@ def _prepare_markers(df: pd.DataFrame, start_idx: int, end_idx: Optional[int]):
             'color': '#f68410',
             'shape': 'arrowDown',
             'text': 'Start'
-        })
-
-    # End marker
-    if end_idx and end_idx > start_idx and (end_idx - 1) < len(timestamps):
-        markers.append({
-            'time': timestamps[end_idx - 1],
-            'position': 'aboveBar',
-            'color': '#f68410',
-            'shape': 'arrowDown',
-            'text': 'End'
         })
 
     return markers

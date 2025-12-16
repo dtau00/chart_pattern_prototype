@@ -25,12 +25,6 @@ def render_label_patterns_tab(app_state):
         return
 
     # Initialize state defaults
-    if 'pattern_length' not in app_state:
-        app_state['pattern_length'] = 50
-    if 'start_index' not in app_state:
-        app_state['start_index'] = 0
-    if 'pattern_label' not in app_state:
-        app_state['pattern_label'] = ''
     if 'selected_file_idx' not in app_state:
         app_state['selected_file_idx'] = 0
 
@@ -67,152 +61,138 @@ def render_label_patterns_tab(app_state):
 
                 file_select.on('update:model-value', on_file_change)
 
-            # Pattern parameters row
-            with ui.row().classes('w-full items-end gap-4'):
-                # Pattern length
-                pattern_length_input = ui.number(
-                    label='Pattern Length (bars)',
-                    value=app_state.get('pattern_length', 50),
-                    min=10,
-                    max=200
-                ).classes('w-48')
-
-                def update_pattern_length(e):
-                    app_state['pattern_length'] = int(e.value)
-                    ui.navigate.reload()
-
-                pattern_length_input.on('update:model-value', update_pattern_length)
-
-                # Start index
-                start_index_input = ui.number(
-                    label='Start Index',
-                    value=app_state.get('start_index', 0),
-                    min=0,
-                    max=max(0, len(df) - app_state.get('pattern_length', 50))
-                ).classes('w-48')
-
-                def update_start_index(e):
-                    app_state['start_index'] = int(e.value)
-                    ui.navigate.reload()
-
-                start_index_input.on('update:model-value', update_start_index)
-
-                # Pattern label
-                pattern_label_input = ui.input(
-                    label='Pattern Label',
-                    placeholder='e.g., head_and_shoulders',
-                    value=app_state.get('pattern_label', '')
-                ).classes('flex-grow')
-
-                def update_pattern_label(e):
-                    app_state['pattern_label'] = e.value
-
-                pattern_label_input.on('update:model-value', update_pattern_label)
-
-        # Get pattern data
-        pattern_length = app_state.get('pattern_length', 50)
-        start_index = app_state.get('start_index', 0)
-        end_index = min(start_index + pattern_length, len(df))
-        pattern_data = df.iloc[start_index:end_index].copy()
-
         # Chart card
         with ui.card().classes('w-full'):
             ui.label(f'{symbol} - {timeframe}').classes('text-h6')
-            ui.label('Click on any bar to see its stats').classes('text-caption text-grey-7 q-mb-md')
+            ui.label('Right-click on a bar to set start/end date').classes('text-caption text-grey-7')
 
-            # Define bar click handler
-            def handle_bar_click(bar_data):
-                """Show dialog with bar statistics."""
-                with ui.dialog() as dialog, ui.card():
-                    ui.label('Bar Statistics').classes('text-h6 q-mb-md')
+            # Define context menu handler
+            def handle_context_menu(event_data):
+                """Handle context menu selection for setting start/end dates."""
+                action = event_data['action']
+                index = event_data['index']
+                time = event_data['time']
 
-                    with ui.column().classes('gap-2'):
-                        ui.label(f"Index: {bar_data['index']}").classes('text-body1')
-                        ui.label(f"Time: {bar_data['time']}").classes('text-body1')
-                        ui.separator()
-                        ui.label(f"Open: ${bar_data['open']}").classes('text-body1')
-                        ui.label(f"High: ${bar_data['high']}").classes('text-body1')
-                        ui.label(f"Low: ${bar_data['low']}").classes('text-body1')
-                        ui.label(f"Close: ${bar_data['close']}").classes('text-body1')
-                        ui.separator()
+                if action == 'start_date':
+                    # Set start index
+                    app_state['_pattern_start_index'] = index
+                    ui.notify(f"Start date set to {time} (index: {index})", type='positive')
+                    ui.navigate.reload() #Reload to show the marker
 
-                        # Color code the change percentage
-                        change = float(bar_data['change'])
-                        change_color = 'positive' if change >= 0 else 'negative'
-                        ui.label(f"Change: {change:+.2f}%").classes(f'text-body1 text-{change_color}')
+                elif action == 'end_date':
+                    # Get start index
+                    current_start = app_state.get('_pattern_start_index', 0)
+                    new_length = index - current_start + 1
 
-                    ui.button('Close', on_click=dialog.close).classes('q-mt-md')
+                    if new_length > 0:
+                        # Get existing pattern labels
+                        library = app_state['pattern_library']
+                        existing_labels = library.get_all_labels()
 
-                dialog.open()
+                        # Show dialog to select or create pattern label
+                        with ui.dialog() as label_dialog, ui.card():
+                            ui.label('Save Pattern').classes('text-h6 q-mb-md')
 
-            # Create TradingView chart with click handler
+                            ui.label(f"Pattern range: {time}").classes('text-caption text-grey-7')
+                            ui.label(f"Pattern length: {new_length} bars").classes('text-caption text-grey-7 q-mb-md')
+
+                            # Dropdown for existing labels or custom input
+                            selected_label = {'value': existing_labels[0] if existing_labels else ''}
+                            custom_label = {'value': ''}
+
+                            if existing_labels:
+                                # Add "Create New" option at the beginning
+                                label_options = ['-- Create New --'] + existing_labels
+
+                                label_select = ui.select(
+                                    label='Select Existing Pattern Label',
+                                    options=label_options,
+                                    value=label_options[0]
+                                ).classes('w-full')
+
+                                def on_label_select(e):
+                                    value = e.args if hasattr(e, 'args') else e.value
+                                    selected_label['value'] = value if value != '-- Create New --' else ''
+                                    if value == '-- Create New --':
+                                        custom_input.set_visibility(True)
+                                    else:
+                                        custom_input.set_visibility(False)
+                                        custom_label['value'] = ''
+
+                                label_select.on('update:model-value', on_label_select)
+                            else:
+                                ui.label('No existing patterns. Create a new label:').classes('text-body2 q-mb-sm')
+
+                            # Custom label input
+                            custom_input = ui.input(
+                                label='Custom Pattern Label',
+                                placeholder='e.g., head_and_shoulders, double_top'
+                            ).classes('w-full')
+
+                            # Show custom input by default if no existing labels or "Create New" selected
+                            if not existing_labels:
+                                custom_input.set_visibility(True)
+                            else:
+                                custom_input.set_visibility(False)
+
+                            def on_custom_input(e):
+                                custom_label['value'] = e.args if hasattr(e, 'args') else e.value
+
+                            custom_input.on('update:model-value', on_custom_input)
+
+                            ui.separator().classes('q-my-md')
+
+                            with ui.row().classes('w-full justify-end gap-2'):
+                                ui.button('Cancel', on_click=label_dialog.close).props('flat')
+
+                                def save_and_close():
+                                    # Determine which label to use
+                                    final_label = custom_label['value'] if custom_label['value'] else selected_label['value']
+
+                                    if not final_label or final_label == '-- Create New --':
+                                        ui.notify('Please enter or select a pattern label', type='warning')
+                                        return
+
+                                    # Save the pattern
+                                    pattern_data = df.iloc[current_start:index + 1].copy()
+                                    _save_pattern(app_state, pattern_data, final_label, symbol, timeframe)
+
+                                    # Clear the start index to remove markers
+                                    if '_pattern_start_index' in app_state:
+                                        app_state.pop('_pattern_start_index', None)
+
+                                    # Close dialog first, then reload to reset the UI
+                                    label_dialog.close()
+                                    ui.navigate.reload()
+
+                                ui.button('Save Pattern', on_click=save_and_close, color='primary')
+
+                        label_dialog.open()
+                    else:
+                        ui.notify(f"End date must be after start date (index {current_start})", type='warning')
+
+            # Create TradingView chart with click and context menu handlers
+            # Get the start index from state (if set)
+            pattern_start = app_state.get('_pattern_start_index', None)
+
             create_tradingview_chart(
                 df=df,
-                start_idx=start_index,
-                end_idx=end_index,
+                start_idx=pattern_start if pattern_start is not None else 0,
+                end_idx=None,  # No end until user sets it
                 height=600,
-                on_bar_click=handle_bar_click
+                on_bar_click=None,  # No left-click handler
+                on_context_menu=handle_context_menu,
+                app_state=app_state  # Pass app_state to preserve zoom/pan
             )
 
-        # Normalized pattern card
+        # Pattern library statistics
         with ui.card().classes('w-full'):
-            show_normalized = ui.checkbox('Show Normalized Pattern', value=False)
-
-            normalized_container = ui.column().classes('w-full q-mt-md')
-
-            def toggle_normalized(e):
-                normalized_container.clear()
-                if e.value:
-                    with normalized_container:
-                        preprocessor = app_state['preprocessor']
-                        normalized = preprocessor.normalize_pattern(pattern_data)
-
-                        fig_norm = go.Figure()
-                        fig_norm.add_trace(go.Scatter(
-                            y=normalized,
-                            mode='lines',
-                            name='Normalized Pattern',
-                            line=dict(color='#2196F3')
-                        ))
-                        fig_norm.update_layout(
-                            title="Normalized Pattern (DDTW)",
-                            xaxis_title="Bar Index",
-                            yaxis_title="Normalized Value",
-                            height=300,
-                            template='plotly_dark'
-                        )
-                        ui.plotly(fig_norm).classes('w-full')
-
-            show_normalized.on('update:model-value', toggle_normalized)
-
-        # Save section
-        with ui.card().classes('w-full'):
-            ui.label('Save Pattern').classes('text-h6 q-mb-md')
-
-            with ui.row().classes('w-full items-center justify-between gap-4'):
-                pattern_label = app_state.get('pattern_label', '')
-
-                def save_pattern():
-                    if not pattern_label:
-                        ui.notify('Please enter a pattern label', type='warning')
-                        return
-                    _save_pattern(app_state, pattern_data, pattern_label, symbol, timeframe)
-                    app_state['pattern_label'] = ''
-                    ui.navigate.reload()
-
-                ui.button(
-                    'Save Pattern',
-                    on_click=save_pattern,
-                    color='primary',
-                    icon='save'
-                ).props('disable' if not pattern_label else '')
-
-                library = app_state['pattern_library']
-                with ui.column():
-                    ui.label(f'Total Patterns: {library.get_template_count()}').classes('text-subtitle2')
-                    if library.get_template_count() > 0:
-                        labels_str = ', '.join(library.get_all_labels())
-                        ui.label(f'Labels: {labels_str}').classes('text-caption text-grey-7')
+            library = app_state['pattern_library']
+            with ui.column():
+                ui.label(f'Total Patterns: {library.get_template_count()}').classes('text-subtitle2')
+                if library.get_template_count() > 0:
+                    labels_str = ', '.join(library.get_all_labels())
+                    ui.label(f'Labels: {labels_str}').classes('text-caption text-grey-7')
 
 
 

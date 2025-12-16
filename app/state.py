@@ -42,6 +42,23 @@ class AppState:
     def __contains__(self, key):
         return key in self.data or key in self._objects
 
+    def __delitem__(self, key):
+        """Delete a key from storage."""
+        if key in self.data:
+            del self.data[key]
+        elif key in self._objects:
+            del self._objects[key]
+        else:
+            raise KeyError(key)
+
+    def pop(self, key, default=None):
+        """Remove and return value for key, or default if key not present."""
+        if key in self.data:
+            return self.data.pop(key, default)
+        elif key in self._objects:
+            return self._objects.pop(key, default)
+        return default
+
     @staticmethod
     def _is_json_serializable(value):
         """Check if a value is JSON serializable."""
