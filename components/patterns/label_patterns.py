@@ -66,6 +66,20 @@ def render_label_patterns_tab(app_state):
             ui.label(f'{symbol} - {timeframe}').classes('text-h6')
             ui.label('Right-click on a bar to set start/end date').classes('text-caption text-grey-7')
 
+            # Pattern overlay toggle
+            if 'show_all_patterns' not in app_state:
+                app_state['show_all_patterns'] = False
+
+            with ui.element('div').style('border: 2px solid #4FC3F7; background-color: transparent; border-radius: 4px; padding: 8px; display: inline-block; margin-top: 8px;'):
+                show_patterns_checkbox = ui.checkbox('Show all existing patterns', value=app_state.get('show_all_patterns', False))
+
+                def toggle_patterns(e):
+                    # e.args contains the new value for update:model-value event
+                    app_state['show_all_patterns'] = e.args
+                    ui.navigate.reload()
+
+                show_patterns_checkbox.on('update:model-value', toggle_patterns)
+
             # Define context menu handler
             def handle_context_menu(event_data):
                 """Handle context menu selection for setting start/end dates."""
@@ -175,6 +189,33 @@ def render_label_patterns_tab(app_state):
             # Get the start index from state (if set)
             pattern_start = app_state.get('_pattern_start_index', None)
 
+            # Prepare pattern overlays if enabled
+            pattern_overlays = []
+            if app_state.get('show_all_patterns', False):
+                library = app_state['pattern_library']
+                # Get all patterns that match the current symbol and timeframe
+                for template in library.templates.values():
+                    if template.symbol == symbol and template.timeframe == timeframe:
+                        # Find the pattern's position in the current dataframe
+                        try:
+                            # Match by timestamp
+                            start_time = pd.Timestamp(template.start_time)
+                            end_time = pd.Timestamp(template.end_time)
+
+                            if start_time in df.index and end_time in df.index:
+                                start_pos = df.index.get_loc(start_time)
+                                end_pos = df.index.get_loc(end_time)
+
+                                pattern_overlays.append({
+                                    'start_idx': start_pos,
+                                    'end_idx': end_pos + 1,
+                                    'label': template.label,
+                                    'color': 'rgba(79, 195, 247, 0.2)'  # Light blue with transparency
+                                })
+                        except (KeyError, ValueError):
+                            # Pattern not found in current data range, skip it
+                            pass
+
             create_tradingview_chart(
                 df=df,
                 start_idx=pattern_start if pattern_start is not None else 0,
@@ -182,7 +223,8 @@ def render_label_patterns_tab(app_state):
                 height=600,
                 on_bar_click=None,  # No left-click handler
                 on_context_menu=handle_context_menu,
-                app_state=app_state  # Pass app_state to preserve zoom/pan
+                app_state=app_state,  # Pass app_state to preserve zoom/pan
+                pattern_overlays=pattern_overlays  # Pass pattern overlays
             )
 
         # Pattern library statistics

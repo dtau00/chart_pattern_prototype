@@ -13,7 +13,8 @@ def create_tradingview_chart(
     height: int = 600,
     on_bar_click: Optional[callable] = None,
     on_context_menu: Optional[callable] = None,
-    app_state: Optional[dict] = None
+    app_state: Optional[dict] = None,
+    pattern_overlays: Optional[list] = None
 ) -> None:
     """
     Create a TradingView candlestick chart with pattern highlighting.
@@ -26,6 +27,7 @@ def create_tradingview_chart(
         on_bar_click: Optional callback function when a bar is clicked
         on_context_menu: Optional callback function when a context menu item is selected
         app_state: Optional app state to persist zoom/pan position across reloads
+        pattern_overlays: Optional list of pattern overlay dicts with keys: start_idx, end_idx, label, color
     """
     if end_idx is None:
         end_idx = len(df)
@@ -33,6 +35,11 @@ def create_tradingview_chart(
     # Prepare candlestick data
     candlestick_data = _prepare_candlestick_data(df)
     markers = _prepare_markers(df, start_idx, end_idx)
+
+    # Prepare pattern overlays data
+    if pattern_overlays is None:
+        pattern_overlays = []
+    pattern_overlays_json = json.dumps(pattern_overlays)
 
     # Generate unique chart ID
     chart_id = f"tvChart_{id(df)}_{start_idx}"
@@ -169,6 +176,70 @@ def create_tradingview_chart(
                 {{ time: startTime, value: maxPrice + priceRange * 0.05 }}
             ]);
         }}
+
+        // Reusable function to draw a rectangle on the chart
+        function drawRectangle(startIdx, endIdx, color, lineWidth = 1, lineStyle = 1) {{
+            if (startIdx >= data.length || endIdx > data.length || endIdx <= startIdx) {{
+                return;
+            }}
+
+            const startTime = data[startIdx].time;
+            const endTime = data[endIdx - 1].time;
+
+            // Get price range for the region
+            const regionData = data.slice(startIdx, endIdx);
+            const maxPrice = Math.max(...regionData.map(d => d.high));
+            const minPrice = Math.min(...regionData.map(d => d.low));
+            const priceRange = maxPrice - minPrice;
+            const padding = priceRange * 0.02;
+
+            // Common line options
+            const lineOptions = {{
+                color: color,
+                lineWidth: lineWidth,
+                lineStyle: lineStyle,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            }};
+
+            // Create four line series for the rectangle borders
+            const topLine = chart.addLineSeries(lineOptions);
+            const bottomLine = chart.addLineSeries(lineOptions);
+            const leftLine = chart.addLineSeries(lineOptions);
+            const rightLine = chart.addLineSeries(lineOptions);
+
+            // Draw top border
+            topLine.setData([
+                {{ time: startTime, value: maxPrice + padding }},
+                {{ time: endTime, value: maxPrice + padding }}
+            ]);
+
+            // Draw bottom border
+            bottomLine.setData([
+                {{ time: startTime, value: minPrice - padding }},
+                {{ time: endTime, value: minPrice - padding }}
+            ]);
+
+            // Draw left border
+            leftLine.setData([
+                {{ time: startTime, value: minPrice - padding }},
+                {{ time: startTime, value: maxPrice + padding }}
+            ]);
+
+            // Draw right border
+            rightLine.setData([
+                {{ time: endTime, value: minPrice - padding }},
+                {{ time: endTime, value: maxPrice + padding }}
+            ]);
+        }}
+
+        // Draw pattern overlays
+        const patternOverlays = {pattern_overlays_json};
+        patternOverlays.forEach((pattern) => {{
+            const color = pattern.color.replace('0.2', '0.8');  // More opaque for border
+            drawRectangle(pattern.start_idx, pattern.end_idx, color, 1, 1);
+        }});
 
         // Create context menu HTML
         const contextMenu = document.createElement('div');
