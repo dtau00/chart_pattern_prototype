@@ -150,7 +150,7 @@ def render_label_patterns_tab(app_state):
                                 ).classes('w-full')
 
                                 def on_label_select(e):
-                                    value = e.args if hasattr(e, 'args') else e.value
+                                    value = e.args
                                     selected_label['value'] = value if value != '-- Create New --' else ''
                                     if value == '-- Create New --':
                                         custom_input.set_visibility(True)
@@ -175,7 +175,7 @@ def render_label_patterns_tab(app_state):
                                 custom_input.set_visibility(False)
 
                             def on_custom_input(e):
-                                custom_label['value'] = e.args if hasattr(e, 'args') else e.value
+                                custom_label['value'] = e.args
 
                             custom_input.on('update:model-value', on_custom_input)
 
@@ -200,6 +200,10 @@ def render_label_patterns_tab(app_state):
                                     if '_pattern_start_index' in app_state:
                                         app_state.pop('_pattern_start_index', None)
 
+                                    # Force pattern library to reload from disk on next page load
+                                    if 'pattern_library' in app_state:
+                                        del app_state['pattern_library']
+
                                     # Close dialog first, then reload to reset the UI
                                     label_dialog.close()
                                     ui.navigate.reload()
@@ -222,7 +226,14 @@ def render_label_patterns_tab(app_state):
                 library = app_state['pattern_library']
                 # Get all patterns that match the selected label, symbol, and timeframe
                 for template in library.templates.values():
-                    if (template.label == selected_pattern_label and
+                    # Normalize template label to string for comparison
+                    template_label = template.label
+                    if isinstance(template_label, dict):
+                        template_label = template_label.get('label', str(template_label))
+                    elif not isinstance(template_label, str):
+                        template_label = str(template_label)
+
+                    if (template_label == selected_pattern_label and
                         template.symbol == symbol and
                         template.timeframe == timeframe):
                         # Find the pattern's position in the current dataframe
@@ -282,7 +293,7 @@ def render_label_patterns_tab(app_state):
                     ).classes('w-full')
 
                     def on_label_change(e):
-                        selected_label['value'] = e.args if hasattr(e, 'args') else e.value
+                        selected_label['value'] = e.args
 
                     label_select.on('update:model-value', on_label_change)
 
@@ -294,6 +305,11 @@ def render_label_patterns_tab(app_state):
                             library.delete_template(pattern_id)
                             library.save()
                             ui.notify(f"Pattern '{template.label}' deleted", type='positive')
+
+                            # Force pattern library to reload from disk on next page load
+                            if 'pattern_library' in app_state:
+                                del app_state['pattern_library']
+
                             pattern_dialog.close()
                             ui.navigate.reload()
 
@@ -310,6 +326,11 @@ def render_label_patterns_tab(app_state):
                                     template.label = new_label
                                     library.save()
                                     ui.notify(f"Pattern label updated to '{new_label}'", type='positive')
+
+                                    # Force pattern library to reload from disk on next page load
+                                    if 'pattern_library' in app_state:
+                                        del app_state['pattern_library']
+
                                 pattern_dialog.close()
                                 ui.navigate.reload()
 
