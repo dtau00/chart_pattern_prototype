@@ -35,6 +35,9 @@ def render_label_patterns_tab(app_state):
     df = pd.read_parquet(selected_file)
     df.index = pd.to_datetime(df.index)
 
+    # Filter out weekend bars (Saturday=5, Sunday=6)
+    df = df[~df.index.dayofweek.isin([5, 6])]
+
     # Extract symbol and timeframe from filename
     filename_parts = selected_file.stem.split('_')
     symbol = filename_parts[0] if len(filename_parts) > 0 else "UNKNOWN"
@@ -327,6 +330,11 @@ def render_label_patterns_tab(app_state):
                 current_pattern_idx = app_state.get('current_pattern_index', 0)
                 current_pattern_idx = max(0, min(current_pattern_idx, len(matching_pattern_templates) - 1))
 
+                # Check if pattern index changed (indicates navigation, not just reload)
+                prev_pattern_idx = app_state.get('_prev_pattern_index', None)
+                pattern_changed = prev_pattern_idx != current_pattern_idx
+                app_state['_prev_pattern_index'] = current_pattern_idx
+
                 # Add all patterns to overlays, highlighting the current one
                 for idx, pattern_template in enumerate(matching_pattern_templates):
                     # Create overlay dict
@@ -341,24 +349,26 @@ def render_label_patterns_tab(app_state):
                     if idx == current_pattern_idx:
                         overlay['color'] = 'rgba(50, 205, 50, 0.8)'  # Lime green for current pattern
 
-                        # Set visible range to center on this pattern
-                        pattern_length = pattern_template['end_idx'] - pattern_template['start_idx']
-                        context_bars = max(pattern_length * 2, 50)  # Show 2x pattern length or min 50 bars
+                        # Only update visible range if pattern changed (user navigated)
+                        if pattern_changed:
+                            # Set visible range to center on this pattern
+                            pattern_length = pattern_template['end_idx'] - pattern_template['start_idx']
+                            context_bars = max(pattern_length * 2, 50)  # Show 2x pattern length or min 50 bars
 
-                        # Calculate visible range indices
-                        center_idx = (pattern_template['start_idx'] + pattern_template['end_idx']) // 2
-                        range_start_idx = max(0, center_idx - context_bars // 2)
-                        range_end_idx = min(len(df) - 1, center_idx + context_bars // 2)
+                            # Calculate visible range indices
+                            center_idx = (pattern_template['start_idx'] + pattern_template['end_idx']) // 2
+                            range_start_idx = max(0, center_idx - context_bars // 2)
+                            range_end_idx = min(len(df) - 1, center_idx + context_bars // 2)
 
-                        # Convert to timestamps (Unix timestamp in seconds)
-                        range_start_time = int(df.index[range_start_idx].timestamp())
-                        range_end_time = int(df.index[range_end_idx].timestamp())
+                            # Convert to timestamps (Unix timestamp in seconds)
+                            range_start_time = int(df.index[range_start_idx].timestamp())
+                            range_end_time = int(df.index[range_end_idx].timestamp())
 
-                        # Update the saved range to center on current pattern
-                        app_state['_chart_visible_range'] = {
-                            'from': range_start_time,
-                            'to': range_end_time
-                        }
+                            # Update the saved range to center on current pattern
+                            app_state['_chart_visible_range'] = {
+                                'from': range_start_time,
+                                'to': range_end_time
+                            }
                     else:
                         overlay['color'] = 'rgba(50, 205, 50, 0.5)'  # Dimmer lime green for other patterns
 
